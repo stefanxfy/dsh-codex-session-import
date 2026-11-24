@@ -1,0 +1,54 @@
+{
+  "name": "dsh-codex-recent-import",
+  "version": "0.1.15",
+  "description": "Import recent Codex turns into DSH with optional older-history summary and batch workspace selection",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stefanxfy/dsh-codex-session-import.git"
+  },
+  "homepage": "https://github.com/stefanxfy/dsh-codex-session-import#readme",
+  "bugs": {
+    "url": "https://github.com/stefanxfy/dsh-codex-session-import/issues"
+  },
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "client.css",
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=24.0.0",
+    "dsh": ">=0.2.2-rc.5 <0.3.0-0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check index.js && node --check client.js",
+    "check:package": "node scripts/check-package.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-api-session-controller"
+      ]
+    }
+  }
+}

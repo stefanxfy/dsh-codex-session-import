@@ -1,0 +1,19 @@
+# Public-source allowlist. Keep local backups, real-session validation,
+# installers, archives, feedback and generated reports on this machine.
+*
+!/.gitignore
+!/README.md
+!/CONTRACT.md
+!/LICENSE
+!/THIRD_PARTY_NOTICES.md
+!/package.json
+!/index.js
+!/client.js
+!/client.css
+!/cordis.patch.yml
+!/src/
+!/src/*.js
+!/test/
+!/test/*.test.js
+!/scripts/
+!/scripts/check-package.mjs

@@ -1,0 +1,11 @@
+import { spawnSync } from 'node:child_process';
+import assert from 'node:assert/strict';
+const result=spawnSync('npm',['pack','--ignore-scripts','--dry-run','--json'],{cwd:new URL('../',import.meta.url),encoding:'utf8',maxBuffer:4*1024*1024});
+if(result.status!==0)throw Error('npm pack dry-run failed: '+result.stderr);
+const [pack]=JSON.parse(result.stdout);
+const allow=new Set(['package.json','index.js','client.js','client.css','cordis.patch.yml','README.md','LICENSE','THIRD_PARTY_NOTICES.md']);
+const runtime=new Set(['src/core.js','src/events.js','src/host.js','src/summary.js','src/adapt.js','src/details.js','src/source-root.js']);
+const names=pack.files.map(f=>f.path);for(const name of names)assert.ok(allow.has(name)||runtime.has(name),'Unexpected/private package entry: '+name);
+for(const name of [...allow,...runtime])assert.ok(names.includes(name),'Missing runtime package entry: '+name);
+assert.ok(pack.unpackedSize<2*1024*1024,'Unexpectedly large package; inspect for transcript content');
+console.log(JSON.stringify({pass:true,name:pack.name,version:pack.version,unpackedSize:pack.unpackedSize,files:names,productionWrites:0,modelCalls:0},null,2));
