@@ -5,36 +5,15 @@ import { homedir } from 'node:os';
 import { createService } from './src/host.js';
 export const name = 'codex-recent-import';
 // Explicit Host service dependencies; shared API routes are registered below.
-export const inject = ['connection','webServer','workspaceRegistry','sessionPersistence','llm','agentDefaultModel'];
+export const inject = ['connection','webServer','workspaceRegistry','sessionPersistence'];
 export async function loadSessionModule(installDir = process.env.DSH_INSTALL_DIR) {
   const require = createRequire(import.meta.url);
   const paths = installDir ? [installDir,dirname(installDir)] : undefined;
   const resolved = require.resolve('@deepseek-ai/dsh-session',paths ? {paths} : undefined);
   return import(pathToFileURL(resolved).href);
 }
-export function createModelAdapter(ctx) {
-  let pinned;
-  const identity = route => JSON.stringify([route.provider,route.model,route.reasoningEffort ?? null]);
-  return {
-    modelKey() { pinned = ctx.agentDefaultModel.currentSelection(); return identity(pinned); },
-    async generate(prompt,{signal}) {
-      if (!pinned || identity(ctx.agentDefaultModel.currentSelection()) !== identity(pinned)) throw Object.assign(new Error('Model route changed; preview again'),{code:'ESTIMATE_CHANGED'});
-      let text='', finished=false;
-      for await (const chunk of ctx.llm.stream({...pinned,messages:[{role:'user',content:[{type:'text',text:prompt}]}],maxTokens:2400,signal})) {
-        signal?.throwIfAborted();
-        if (finished) throw new Error('Configured model emitted data after completion');
-        if (chunk.type === 'text-delta') text += chunk.text;
-        if (chunk.type === 'finish') {
-          if (chunk.reason?.kind !== 'stop') throw new Error('Configured model did not complete summary normally');
-          finished=true;
-        }
-        if (text.length > 8000) throw new Error('Summary output exceeded budget');
-      }
-      signal?.throwIfAborted();
-      if (!finished) throw new Error('Configured model stream ended without completion');
-      return text;
-    }
-  };
+export function createModelAdapter() {
+  throw Object.assign(new Error('AI summary is disabled'),{code:'AI_SUMMARY_DISABLED'});
 }
 export function createRpcHandler(service) {
   const operation=createOperationHandler(service);
@@ -86,8 +65,7 @@ export async function registerImportRoutes(connection,service) {
 export async function apply(ctx,config = {}) {
   const session=await loadSessionModule();
   if (session.SESSION_FORMAT_VERSION !== 4) throw new Error('This importer requires DSH session format v4');
-  const adapter=createModelAdapter(ctx);
-  const service=createService({workspaceRegistry:ctx.workspaceRegistry,persistence:ctx.sessionPersistence,Session:session.Session,SessionId:session.SessionId,version:session.SESSION_FORMAT_VERSION,projectionCache:ctx.get?.('sessionProjectionCache'),...adapter,cacheRoot:config.cacheRoot ?? join(homedir(),'.dsh','codex-recent-import')},config);
+  const service=createService({workspaceRegistry:ctx.workspaceRegistry,persistence:ctx.sessionPersistence,Session:session.Session,SessionId:session.SessionId,version:session.SESSION_FORMAT_VERSION,projectionCache:ctx.get?.('sessionProjectionCache'),cacheRoot:config.cacheRoot ?? join(homedir(),'.dsh','codex-recent-import')},config);
   const off=await registerImportRoutes(ctx.connection,service);
   ctx.on('dispose',async()=>{await off();await service.dispose();});
 }

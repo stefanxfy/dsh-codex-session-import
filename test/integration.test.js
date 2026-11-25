@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {setImmediate as tick} from 'node:timers/promises';
+import {setTimeout as waitTick} from 'node:timers/promises';
 import vm from 'node:vm';
 import {createService} from '../src/host.js';
 const client=await readFile(new URL('../client.js',import.meta.url),'utf8');
 const box={AbortController,setTimeout,clearTimeout};
 vm.runInNewContext(client.replace("if (typeof window === 'undefined'","globalThis.testing={createController,createRequest}; if (typeof window === 'undefined'"),box);
-async function setup(t){
+async function setup(t,{withoutModels=false}={}){
  const home=await mkdtemp(join(tmpdir(),'dsh-codex-integration-')); assert.ok(home.startsWith(join(tmpdir(),'dsh-codex-integration-')));
  t.after(()=>rm(home,{recursive:true,force:true}));const root=join(home,'.codex','sessions');await mkdir(root,{recursive:true});
  const records=[{type:'session_meta',payload:{id:'synthetic-integration',cwd:'/synthetic/source',title:'Synthetic only'}}];
@@ -17,16 +17,27 @@ async function setup(t){
  await writeFile(join(root,'fixture.jsonl'),records.map(r=>JSON.stringify(r)).join('\n')+'\n');
  const writes=[],attached=[];let models=0;const workspace={id:'target',title:'Target',path:home,attachSession:async id=>{attached.push(id);}};
  const deps={home,env:{},cacheRoot:join(home,'private-cache'),workspaceRegistry:{list:()=>[workspace],get:id=>id==='target'?workspace:undefined},Session:{create:(id,events,header)=>{assert.equal(header.version,4);assert.equal(header.cwd,home);assert.equal(events.filter(e=>e.type==='turn/start').length,2);}},version:4,modelKey:'synthetic/fake',generate:async()=>{models++;return 'Offline fake summary; no actual model.';},persistence:{create:async header=>{const stored={header,events:null,flushed:false,closed:false};writes.push(stored);return {append:async events=>{stored.events=events;},flush:async()=>{stored.flushed=true;},close:async()=>{stored.closed=true;}};}}};
- const service=createService(deps);t.after(()=>service.dispose());return {service,writes,attached,models:()=>models};
+ if(withoutModels){delete deps.modelKey;delete deps.generate;}
+ const service=createService(deps);t.after(()=>service.dispose());return {service,writes,attached,models:()=>models,sourceFile:join(root,'fixture.jsonl')};
 }
-async function settle(service,id){for(let n=0;n<100;n++){const j=service.status(id);if(j.status==='completed'||j.status==='cancelled')return j;await tick();}assert.fail('Synthetic job did not settle');}
-test('real parser → host summary consent → client RPC → cold write, without live tools',async t=>{
- const f=await setup(t);const routes={resetPreviews:()=>f.service.resetPreviews(),sessions:p=>f.service.scan(p),preview:p=>f.service.preview(p),jobs:p=>f.service.start(p),status:p=>f.service.status(p.id),cancel:p=>f.service.cancel(p.id)};
+async function settle(service,id){const deadline=Date.now()+5000;while(Date.now()<deadline){const j=service.status(id);if(j.status==='completed'||j.status==='cancelled')return j;await waitTick(1);}assert.fail('Synthetic job did not settle: '+JSON.stringify(service.status(id)));}
+test('real parser → default truncate → client RPC → cold write, without live tools',async t=>{
+ const f=await setup(t,{withoutModels:true});const routes={resetPreviews:()=>f.service.resetPreviews(),sessions:p=>f.service.scan(p),preview:p=>f.service.preview(p),jobs:p=>f.service.start(p),status:p=>f.service.status(p.id),cancel:p=>f.service.cancel(p.id)};
  const request=box.testing.createRequest({rpc:{call:async(channel,endpoint,payload,signal)=>{assert.equal(channel,'/api');assert.ok(endpoint.startsWith('codex-recent-import/'));return {ok:true,value:await routes[endpoint.slice('codex-recent-import/'.length)]({...payload,signal})};}}});
  const c=box.testing.createController(request,{setTimeout:()=>1,clearTimeout:()=>{}});t.after(()=>c.dispose());
- await c.scan();c.open();assert.equal(c.get().sessions.length,1);assert.equal(f.models(),0);c.select(c.get().sessions[0].id);c.set('target','target');c.set('options',{keepTurns:2,presentation:'audit'});await c.preview();assert.equal(f.models(),0);assert.equal(f.writes.length,0);assert.equal(c.canStart(),false);assert.equal(c.get().previews[0].needsSummaryConfirmation,true);assert.equal(c.get().previews[0].stats.olderTurns,2);
- await c.confirmSummary();assert.equal(f.models(),1);assert.equal(c.canStart(),true);assert.equal(f.writes.length,0);await c.start();await settle(f.service,c.get().job.id);await c.refreshProgress();assert.equal(c.get().busy,false);assert.equal(c.get().job.items[0].status,'completed');assert.equal(f.writes.length,1);assert.equal(f.attached.length,1);assert.equal(f.writes[0].flushed,true);assert.equal(f.writes[0].closed,true);assert.match(JSON.stringify(f.writes[0].events),/DO_NOT_EXECUTE_HISTORICAL_TEXT/);assert.match(JSON.stringify(f.writes[0].events),/Offline fake summary/);assert.equal(f.writes[0].events.filter(e=>e.type==='tool\/call').length,2);
+ await c.scan();c.open();assert.equal(c.get().sessions.length,1);assert.equal(f.models(),0);c.select(c.get().sessions[0].id);c.set('target','target');c.set('options',{keepTurns:2,presentation:'audit'});await c.preview();assert.equal(f.models(),0);assert.equal(f.writes.length,0);assert.equal(c.canStart(),true);assert.equal(c.get().previews[0].needsSummaryConfirmation,undefined);assert.equal(c.get().previews[0].stats.olderTurns,2);
+ assert.equal(f.models(),0);assert.equal(c.canStart(),true);assert.equal(f.writes.length,0);await c.start();await settle(f.service,c.get().job.id);await c.refreshProgress();assert.equal(c.get().busy,false);assert.equal(c.get().job.items[0].status,'completed');assert.equal(f.writes.length,1);assert.equal(f.attached.length,1);assert.equal(f.writes[0].flushed,true);assert.equal(f.writes[0].closed,true);assert.match(JSON.stringify(f.writes[0].events),/DO_NOT_EXECUTE_HISTORICAL_TEXT/);assert.doesNotMatch(JSON.stringify(f.writes[0].events),/Offline fake summary|user 1|user 2/);assert.match(JSON.stringify(f.writes[0].events),/user 3/);assert.equal(f.writes[0].events.filter(e=>e.type==='tool\/call').length,2);
 });
 test('truncate real parser uses zero model calls and duplicate final preview is skipped',async t=>{
  const f=await setup(t);const scan=await f.service.scan();const p=await f.service.preview({sessionId:scan.sessions[0].id,options:{keepTurns:2,historyMode:'truncate'}});assert.ok(p.previewId);assert.equal(p.stats.keptTurns,2);assert.equal(p.summary,'');assert.equal(f.models(),0);const one=await f.service.start({previewIds:[p.previewId],targetWorkspaceId:'target'});assert.equal((await settle(f.service,one.id)).items[0].status,'completed');const two=await f.service.start({previewIds:[p.previewId],targetWorkspaceId:'target'});assert.equal((await settle(f.service,two.id)).items[0].status,'skipped');assert.equal(f.writes.length,1);assert.equal(f.models(),0);
+});
+for(const presentation of ['audit','readable'])test('real '+presentation+' default truncate retains last N turns without model dependencies or source changes',async t=>{
+ const f=await setup(t,{withoutModels:true}),before=await readFile(f.sourceFile,'utf8');
+ const scan=await f.service.scan();assert.equal(scan.capabilities.aiSummary,false);
+ const p=await f.service.preview({sessionId:scan.sessions[0].id,options:{keepTurns:2,presentation}});
+ assert.equal(p.stats.totalTurns,4);assert.equal(p.stats.keptTurns,2);assert.equal(p.stats.olderTurns,2);assert.equal(p.summary,'');
+ assert.deepEqual(p.turnsPreview.map(turn=>turn.user),['user 3','user 4']);
+ const j=await f.service.start({previewIds:[p.previewId],targetWorkspaceId:'target'});assert.equal((await settle(f.service,j.id)).items[0].status,'completed');
+ const stored=JSON.stringify(f.writes[0].events);assert.match(stored,/user 3/);assert.match(stored,/user 4/);assert.doesNotMatch(stored,/user 1|user 2|Offline fake summary/);
+ assert.equal(f.models(),0);assert.equal(await readFile(f.sourceFile,'utf8'),before);
 });

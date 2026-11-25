@@ -1,7 +1,7 @@
 {
   "name": "dsh-codex-recent-import",
-  "version": "0.1.15",
-  "description": "Import recent Codex turns into DSH with optional older-history summary and batch workspace selection",
+  "version": "0.1.28",
+  "description": "Import recent Codex turns locally into DSH with batch workspace selection; no AI summarization",
   "type": "module",
   "license": "MIT",
   "repository": {
