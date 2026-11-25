@@ -50,5 +50,14 @@
         "@deepseek-ai/dsh-api-session-controller"
       ]
     }
-  }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "codex",
+    "session-import",
+    "conversation-history",
+    "deepseek"
+  ]
 }
